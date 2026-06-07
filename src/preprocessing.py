@@ -2,37 +2,65 @@ import pandas as pd
 import numpy as np
 import ipaddress
 import logging
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 
-# Setup professional logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def robust_ip_to_int(ip):
-    if isinstance(ip, (int, float, np.integer, np.floating)):
-        return float(ip)
-    try:
-        return float(int(ipaddress.ip_address(str(ip))))
-    except Exception as e:
-        return 0.0
+class FraudPreprocessor:
+    """Explicit and reusable pipeline for Fraud Detection Preprocessing."""
+    
+    def __init__(self):
+        self.label_encoders = {}
+        self.scaler = StandardScaler()
+        
+    def clean_data(self, df):
+        """Task 1: Explicit Data Cleaning."""
+        logger.info("Starting Explicit Cleaning...")
+        initial_rows = len(df)
+        
+        # 1. Handle Missing Values: Drop rows with missing crucial IDs
+        df = df.dropna(subset=['user_id', 'device_id'])
+        
+        # 2. Handle Duplicates: Remove duplicate transactions
+        df = df.drop_duplicates()
+        
+        # 3. Correct Data Types
+        df['signup_time'] = pd.to_datetime(df['signup_time'])
+        df['purchase_time'] = pd.to_datetime(df['purchase_time'])
+        
+        logger.info(f"Cleaned {initial_rows - len(df)} rows. Current shape: {df.shape}")
+        return df
 
-def merge_ip_to_country(fraud_df, ip_df):
-    logger.info("Starting IP-Country merge...")
+    def engineer_features(self, df):
+        """Task 1: Explicit Feature Engineering."""
+        logger.info("Engineering Behavioral Features...")
+        
+        # Time since signup (Behavioral pattern)
+        df['time_since_signup'] = (df['purchase_time'] - df['signup_time']).dt.total_seconds() / 3600 # hours
+        
+        # Hour of Day & Day of Week (Temporal patterns)
+        df['hour_of_day'] = df['purchase_time'].dt.hour
+        df['day_of_week'] = df['purchase_time'].dt.dayofweek
+        
+        # Transaction Velocity (Device sharing)
+        df['device_velocity'] = df.groupby('device_id')['user_id'].transform('count')
+        
+        return df
 
-    fraud_df['ip_numeric'] = fraud_df['ip_address'].apply(robust_ip_to_int)
-    ip_df['lower_bound_numeric'] = ip_df['lower_bound_ip_address'].astype(float)
-
-    fraud_df = fraud_df.sort_values('ip_numeric')
-    ip_df = ip_df.sort_values('lower_bound_numeric')
-
-    merged = pd.merge_asof(
-        fraud_df, ip_df, 
-        left_on='ip_numeric', 
-        right_on='lower_bound_numeric', 
-        direction='backward'
-    )
-
-    merged.loc[merged['ip_numeric'] > merged['upper_bound_ip_address'], 'country'] = 'Unknown'
-    merged['country'] = merged['country'].fillna('Unknown')
-
-    logger.info("Merge complete.")
-    return merged
+    def encode_categories(self, df, is_train=True):
+        """Task 1: Professional Categorical Encoding."""
+        logger.info("Encoding Categorical Variables...")
+        cat_cols = ['source', 'browser', 'sex', 'country']
+        
+        for col in cat_cols:
+            if col in df.columns:
+                if is_train:
+                    le = LabelEncoder()
+                    df[col] = le.fit_transform(df[col].astype(str))
+                    self.label_encoders[col] = le
+                else:
+                    # For test set, handle unseen labels by mapping to a default
+                    le = self.label_encoders[col]
+                    df[col] = df[col].apply(lambda x: le.transform([x])[0] if x in le.classes_ else -1)
+        return df
