@@ -11,5 +11,11 @@ class TestPreprocessing(unittest.TestCase):
         # Test invalid IP
         self.assertEqual(robust_ip_to_int("invalid"), 0.0)
 
+    def test_empty_df_handling(self):
+        preprocessor = FraudPreprocessor()
+        with self.assertRaises(ValueError):
+            preprocessor.clean_data(pd.DataFrame())
+
 if __name__ == '__main__':
     unittest.main()
+
